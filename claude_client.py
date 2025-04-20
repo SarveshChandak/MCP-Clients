@@ -1,3 +1,8 @@
+## References:
+## 1. https://modelcontextprotocol.io/quickstart/client
+
+import sys
+import os
 import asyncio
 from typing import Optional
 from contextlib import AsyncExitStack
@@ -15,7 +20,7 @@ class MCPClient:
         # Initialize session and client objects
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
-        self.anthropic = Anthropic()
+        self.anthropic = Anthropic(api_key = os.getenv("ANTHROPIC_API_KEY"))  # Load Anthropic API key from environment variables
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -143,6 +148,8 @@ async def main():
         await client.cleanup()
 
 if __name__ == "__main__":
-    import sys
     print("Starting MCP Client...")
     asyncio.run(main())
+
+## Use this command to run the client with server script: uv run claude_client.py "C:/Users/sarve/Documents/Personal Experiments/MCP Experiment/MCP Server/tool_poisoning/tool_poisoning.py"
+## Use this command to run the client with server script: uv run claude_client.py "C:/Users/sarve/Documents/Personal Experiments/MCP Experiment/MCP Server/weather/weather.py"

@@ -1,3 +1,8 @@
+## References:
+## 1. https://modelcontextprotocol.io/quickstart/client
+
+import sys
+import os
 import asyncio
 from typing import Optional
 from contextlib import AsyncExitStack
@@ -5,7 +10,8 @@ from contextlib import AsyncExitStack
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-import openai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()  # load environment variables from .env
@@ -15,7 +21,7 @@ class MCPClient:
         # Initialize session and client objects
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
-        openai.api_key = os.getenv("OPENAI_API_KEY")  # Load OpenAI API key from environment variables
+        self.genai_client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))  # Load Gemini API key from environment variables
 
     async def connect_to_server(self, server_script_path: str):
         """Connect to an MCP server
@@ -47,56 +53,60 @@ class MCPClient:
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
     async def process_query(self, query: str) -> str:
-        """Process a query using OpenAI and available tools"""
-        messages = [
+        """Process a query using Gemini and available tools"""
+        # Fetch available tools from the server
+        response = await self.session.list_tools()
+        available_tools = [
             {
-                "role": "user",
-                "content": query
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.inputSchema,
             }
+            for tool in response.tools
         ]
 
-        response = await self.session.list_tools()
-        available_tools = [{ 
-            "name": tool.name,
-            "description": tool.description,
-            "input_schema": tool.inputSchema
-        } for tool in response.tools]
+        # Convert tools to Gemini function declarations
+        function_declarations = [
+            {
+                "name": tool["name"],
+                "description": tool["description"],
+                "parameters": tool["parameters"],
+            }
+            for tool in available_tools
+        ]
 
-        # Initial OpenAI API call
-        response = openai.chat.completions.create(
-            model="gpt-4",
-            messages=messages,
-            functions=available_tools
+        # Configure Gemini tools
+        tools = types.Tool(function_declarations=function_declarations)
+        config = types.GenerateContentConfig(tools=[tools])
+
+        # Initial Gemini API call
+        genai_response = self.genai_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=query,
+            config=config,
         )
 
-        # Process response and handle tool calls
-        tool_results = []
+        # Process response and handle function calls
         final_text = []
+        tool_results = []
 
-        for choice in response.choices:
-            if choice.message.get("function_call"):
-                tool_name = choice.message["function_call"]["name"]
-                tool_args = choice.message["function_call"]["arguments"]
-                
-                # Execute tool call
-                result = await self.session.call_tool(tool_name, tool_args)
-                tool_results.append({"call": tool_name, "result": result})
-                final_text.append(f"[Calling tool {tool_name} with args {tool_args}]")
+        for candidate in genai_response.candidates:
+            for part in candidate.content.parts:
+                if part.function_call:
+                    function_call = part.function_call
+                    print(function_call, "\n")
+                    tool_name = function_call.name
+                    tool_args = function_call.args
 
-                # Continue conversation with tool results
-                messages.append({
-                    "role": "assistant",
-                    "content": result.content
-                })
+                    # Call the tool using the MCP session
+                    tool_result = await self.session.call_tool(tool_name, tool_args)
+                    tool_results.append(f"Tool: {tool_name}, Result: {tool_result.content}")
 
-                # Get next response from OpenAI
-                response = openai.ChatCompletion.create(
-                    model="gpt-4",
-                    messages=messages,
-                )
-                final_text.append(response.choices[0].message["content"])
-            else:
-                final_text.append(choice.message["content"])
+                    # Add tool result to the conversation
+                    final_text.append(f"[Tool {tool_name} Result]: {tool_result.content}")
+                else:
+                    # Add regular text response
+                    final_text.append(part.text)
 
         return "\n".join(final_text)
 
@@ -109,7 +119,7 @@ class MCPClient:
             try:
                 query = input("\nQuery: ").strip()
                 
-                if query.lower() == 'quit':
+                if query.lower() in ['quit', 'exit']:
                     break
                     
                 response = await self.process_query(query)
@@ -135,7 +145,8 @@ async def main():
         await client.cleanup()
 
 if __name__ == "__main__":
-    import sys
-    import os
     print("Starting MCP Client...")
     asyncio.run(main())
+
+## Use this command to run the client with server script: uv run gemini_client.py "C:/Users/sarve/Documents/Personal Experiments/MCP Experiment/MCP Server/tool_poisoning/tool_poisoning.py"
+## Use this command to run the client with server script: uv run gemini_client.py "C:/Users/sarve/Documents/Personal Experiments/MCP Experiment/MCP Server/weather/weather.py"
