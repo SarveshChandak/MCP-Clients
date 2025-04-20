@@ -9,7 +9,7 @@ The MCP Client is a Python-based application that interacts with the Model Conte
 - Handles tool calls dynamically based on server-provided tools.
 
 ## Requirements
-- Python 3.13 or higher
+- Python 3.10 or higher
 - Required dependencies listed in `pyproject.toml`
 
 ## Setup Instructions
